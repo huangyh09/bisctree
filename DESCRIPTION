@@ -1,0 +1,11 @@
+Package: bisctree
+Type: Package
+Title: Bayesian integrative somatic clonal tree
+Version: 0.1.0
+Author: Yuanhua Huang and Tobias Heinen
+Maintainer: Yuanhua Huang <yuanhua@ebi.ac.uk>
+Description: Somatic clonal tree inference by integrating bulk-DNA and single-
+    cell RNA-seq data.
+License: GPL (>= 3)
+Encoding: UTF-8
+LazyData: true
