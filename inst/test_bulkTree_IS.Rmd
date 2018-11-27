@@ -1,0 +1,56 @@
+---
+title: "Tree inference from bulk data with Importance samping"
+author: "Yuanhua Huang"
+to_working_dir: "./"
+output:
+  html_document:
+        toc: true
+        toc_float: true
+        theme: journal
+        highlight: pygments
+        number_sections: true
+        code_folding: hide
+---
+
+This notebook gives an example to test the implementation of the importance 
+sampling algorithm, proposed by [PASTRI](https://github.com/raphael-group/PASTRI)
+
+**Note** this implementation is not completed yet, particularly the enumerise of
+all orders of clones hasn't been added.
+
+
+
+# This is an example for tree inference from bulk DNA-seq
+## Load data
+```{r}
+library(bisctree)
+A <- as.matrix(read.table(system.file("example", "example_A.txt", 
+                                      package = "bisctree"))[,1])
+D <- as.matrix(read.table(system.file("example", "example_D.txt", 
+                                      package = "bisctree"))[,1])
+```
+
+## Generate sciClone proposals
+```{r}
+# devtools::install_github("genome/bmm")
+# devtools::install_github("genome/sciClone")
+
+library(sciClone)
+
+PPMatrix_dir <- system.file("PPMatrix", package = "bisctree")
+sc_prop <- sciClone_proposal(A, D, PPMatrix_dir)
+proposal <- sc_prop$proposal
+B_inv_list <- sc_prop$B_inv_list
+```
+
+# Run importance sampling
+```{r}
+# install.packages("gtools")
+# library(gtools)
+
+res.tmp <- bulk_tree_IS(A, D, B_inv_list, proposal, n_iter = 5000)
+matrixStats::colLogSumExps(res.tmp) - log(nrow(res.tmp))
+colSums(res.tmp > -Inf)
+```
+
+

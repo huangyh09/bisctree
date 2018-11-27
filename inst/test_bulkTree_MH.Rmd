@@ -1,0 +1,219 @@
+---
+title: "Tree inference for bulk DNA-seq with Metropolis-Hasting samping or Hybrid MCMC sampling"
+author: "Yuanhua Huang"
+to_working_dir: "./"
+output:
+  html_document:
+        toc: true
+        toc_float: true
+        theme: journal
+        highlight: pygments
+        number_sections: true
+        code_folding: hide
+---
+
+Note: in PASTRI, importance sampling is used to integrate the allelic frequency vector. When there are multiple trees, the proposal may not explore all space for each tree.
+
+Here, we try to use the Metropolis-Hasting algorithm to sample the tree as a discrete variable and the clonal fraction. For the discrete variable (label of the tree), we design a transition matrix and for the clonal fraction, we use a logit-normal distribution.
+
+** Note, we could adptive the proposal for the transistion matrix by its empirical samples.**
+
+TODO: 1) using EM as a good initialzation
+2) check all EM ordering with tree compatibility
+
+EM also need good initialization, otherwise, it ends up a local optima. Better try multiple short trials
+
+
+
+# Load example data
+Five clones with 8 samples. The simulaiton truth is tree 5 for 8 samples, but 
+by using a single sample, we may obtain different tree.
+```{r}
+library(bisctree)
+A <- as.matrix(read.table(system.file("example", "example_A.txt", 
+                                      package = "bisctree"))[,1])
+D <- as.matrix(read.table(system.file("example", "example_D.txt", 
+                                      package = "bisctree"))[,1])
+
+tree_file <- system.file("PPMatrix", "Matrix5.txt", package = "bisctree") 
+dat_tmp <- read.table(tree_file, skip = 1)
+B_list <- list()
+for (it in seq_len(nrow(dat_tmp) / ncol(dat_tmp))) {
+  first_idx <- ncol(dat_tmp) * (it - 1) + 1
+  last_idx <- ncol(dat_tmp) * it
+  B_list[[it]] <- as.matrix(dat_tmp[first_idx:last_idx, ])
+}
+```
+
+```{r}
+B_list
+```
+
+
+# Test EM algorithm for binomial mixture model
+Note, EM works on single-sample case, but still ends up a local optima for 
+multiple samples, hence often requires multiple random initializations.
+```{r}
+rt_mix <- mixBinom(A[,1], D[,1], 5, tol = 1e-5)
+t(rt_mix$p * 2)
+```
+
+```{r}
+#options(digits=2)
+
+n_init = 20
+logLik_all <- rep(0, n_init)
+p_all <- matrix(0, nrow = n_init, ncol = 5)
+for (i in seq_len(n_init)) {
+    #rt_mix <- mixBinom(A, D, 5)
+    rt_mix <- mixBinom(A[,1], D[,1], 5, max_iter = 500)
+
+    logLik_all[i] <- rt_mix$log_like
+    p_all[i, ] <- t(rt_mix$p * 2)
+}
+
+t(p_all[which.max(logLik_all), ])
+t(logLik_all)
+```
+
+# Test MH sampling
+
+```{r}
+# library(mvtnorm)
+# source("~/MyGit/cardelino/R/bulk_tree_MH.R")
+
+rt_samp <- bulk_tree_MH(A[,1], D[,1], B_list, n_iter = 5000, sigma = 0.015)
+#rt_samp <- bulk_tree_MH(A[,1], D[,1], list(B_list=B_list[[3]]), n_iter=5000, sigma=0.015)
+```
+
+```{r}
+library(ggpubr)
+
+table(rt_samp$tree_all)
+mean(rt_samp$accept_all)
+t(rt_samp$accept_all[1:40])
+idx <- which.max(rt_samp$P_all)
+t(B_list[[1]] %*% rt_samp$Psi_all[[idx]])
+
+dat_tmp <- data.frame(x=seq_len(length(rt_samp$P_all)), P_all=rt_samp$P_all, 
+                      tree_all=rt_samp$tree_all)
+
+options(repr.plot.width=6, repr.plot.height=2)
+fig1 <- ggplot(dat_tmp, aes(x=x, y=P_all)) + geom_point()
+fig2 <- ggplot(dat_tmp, aes(x=x, y=tree_all)) + geom_point() + ylab("Tree index sampling")
+ggarrange(fig1, fig2)
+```
+
+```{r}
+idx <- which.max(rt_samp$P_all)
+t(rt_samp$Psi_all[[idx]])
+t(B_list[[rt_samp$tree_all[idx]]] %*% rt_samp$Psi_all[[idx]])
+
+Psi_avg = rt_samp$Psi_all[[1]]
+Psi_avg[,] = 0
+for(i in seq(2001:5000)){
+    Psi_avg <- Psi_avg + (B_list[[5]] %*% rt_samp$Psi_all[[i]])
+}
+t(Psi_avg / 3001)
+```
+
+0.855, 0.710, 0.463, 0.153, 0.025
+
+0.85540178, 0.70968325, 0.46347363, 0.15341701, 0.02520374
+
+
+
+# Test HHybrid MCMC sampling
+
+```{r}
+rt_samp <- bulk_tree_hybrid(A[,1], D[,1], B_list, n_iter=5000, sigma=0.015)
+```
+
+```{r}
+library(ggpubr)
+
+table(rt_samp$tree_all)
+mean(rt_samp$accept_all)
+t(rt_samp$accept_all[1:40])
+idx <- which.max(rt_samp$P_all)
+t(B_list[[1]] %*% rt_samp$Psi_all[[idx]])
+
+dat_tmp <- data.frame(x=seq_len(length(rt_samp$P_all)), P_all=rt_samp$P_all, 
+                      tree_all=rt_samp$tree_all)
+
+options(repr.plot.width=6, repr.plot.height=2)
+fig1 <- ggplot(dat_tmp, aes(x=x, y=P_all)) + geom_point()
+fig2 <- ggplot(dat_tmp, aes(x=x, y=tree_all)) + geom_point() + ylab("Tree index sampling")
+ggarrange(fig1, fig2)
+```
+
+
+
+# A simple tutorial example for MH sampling with discrete variable
+
+```{r}
+## a simple example for sampling discrete variable
+
+P_target <- c(0.2, 0.1, 0.4, 0.3)
+
+MH_sample <- function(K=4, n_iter=20, trans_mat=NULL){
+    if(is.null(trans_mat)){ 
+        trans_mat <- matrix(1.0/K, nrow=K, ncol=K)}
+
+    P_all <- rep(0, n_iter)
+    label_all <- rep(0, n_iter)
+    accept_all <- rep(FALSE, n_iter)
+    
+    label_cur <- sample(K, size=1)
+    P_cur <- P_target[label_cur]
+    for(i in seq_len(n_iter)){
+        #proposal a new state
+        label_new <- sample(K, size=1, replace=T, prob=trans_mat[label_cur,])
+        P_new <- P_target[label_new]
+        Q_cur <- trans_mat[label_new, label_cur]
+        Q_new <- trans_mat[label_cur, label_new]
+        
+        #accept ratio
+        alpha <- min(1, (P_new * Q_cur) / (P_cur * Q_new))
+        if (alpha >= runif(1, min = 0, max = 1)){
+            P_all[i] <- P_new
+            label_all[i] <- label_new
+            accept_all[i] <- TRUE
+            P_cur <- P_new
+            label_cur <- label_new
+            
+        }else{
+            label_all[i] <- label_cur
+            P_all[i] <- P_cur
+        }
+    }
+    return_list <- list(label_all=label_all, P_all=P_all, accept_all=accept_all)
+    return_list
+}
+```
+
+```{r}
+n_iter = 1000
+rt_samples <- MH_sample(n_iter = n_iter)
+table(rt_samples$label_all[(n_iter/2+1):n_iter])
+
+mean(rt_samples$accept_all)
+```
+
+```{r}
+K = 4
+test_mat <- matrix(sample(1000, size=K*K, replace=T), nrow=K, ncol=K)
+test_mat <- test_mat / rowSums(test_mat)
+
+adap_mat <- t(matrix(rep(table(rt_samples$label_all[(n_iter/2+1):n_iter]), K), nrow=K))
+test_mat <- adap_mat / rowSums(adap_mat)
+
+test_mat
+#rowSums(test_mat)
+
+n_iter = 2000
+rt_samples <- MH_sample(n_iter = n_iter, trans_mat = test_mat)
+table(rt_samples$label_all[(n_iter/2+1):n_iter])
+
+mean(rt_samples$accept_all)
+```
